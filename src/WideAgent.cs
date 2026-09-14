@@ -1321,6 +1321,20 @@ namespace WideAgent
             string dir = Path.GetDirectoryName(Application.ExecutablePath);
             Log.Path = Path.Combine(dir, "WideAgent.log");
 
+            // 미처 잡지 못한 예외까지 로그로 남긴다. 기본 동작인 오류 대화상자는
+            // 상주 프로그램에 어울리지 않는다. 사용자는 창을 띄운 적이 없는데
+            // 낯선 .NET 오류 창을 보게 되고, 닫으면 그대로 종료된다.
+            Application.SetUnhandledExceptionMode(UnhandledExceptionMode.CatchException);
+            Application.ThreadException += delegate(object s2, ThreadExceptionEventArgs te)
+            {
+                Log.Write("처리되지 않은 예외: " + te.Exception.Message);
+            };
+            AppDomain.CurrentDomain.UnhandledException += delegate(object s2, UnhandledExceptionEventArgs ue)
+            {
+                var ex = ue.ExceptionObject as Exception;
+                Log.Write("치명적 예외: " + (ex != null ? ex.Message : "알 수 없음"));
+            };
+
             // 폭을 1280px 이상으로 바꾸고 싶으면 exe 옆에 WideAgent.width.txt 를 만들고
             // '2000px' 이나 'min(2400px,80vw)' 같은 CSS 길이 값을 한 줄로 적으면 된다.
             try
@@ -1692,7 +1706,16 @@ namespace WideAgent
             };
         }
 
+        // 1초마다 도는 감시 루프다. 여기서 예외가 새어 나가면 WinForms 가 오류
+        // 대화상자를 띄우고 상주가 끝난다. 트레이 프로그램이 말없이 사라지면
+        // 사용자는 이유를 알 수 없으므로, 무슨 일이 있어도 다음 점검은 계속 돈다.
         static void Poll(object sender, EventArgs e)
+        {
+            try { PollOnce(); }
+            catch (Exception ex) { Log.Write("점검 예외: " + ex.Message); }
+        }
+
+        static void PollOnce()
         {
             if (busy) return;
             bool claudeReady = Claude.IsReady(AppKind.Claude);
