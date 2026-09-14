@@ -89,3 +89,7 @@ Windows에 기본으로 들어 있는 .NET Framework 4.x 컴파일러만 쓴다.
 ## 라이선스
 
 MIT. [LICENSE](LICENSE) 참고.
+
+## 만든 곳
+
+miniwhalelabs · miniwhalelabs@gmail.com
