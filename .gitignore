@@ -12,3 +12,6 @@ WideAgent.claude.applied
 
 # 사용자 설정
 WideAgent.width.txt
+
+# 아이콘 시안 작업 폴더 (배포 저장소에 넣지 않는다)
+assets/

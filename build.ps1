@@ -22,7 +22,9 @@ if ($Icon) {
 }
 
 $ico = "$PSScriptRoot\WideAgent.ico"
-$src = "$PSScriptRoot\src\WideAgent.cs"
+
+# AssemblyInfo.cs 는 exe 속성 창에 뜨는 제품명·회사명·버전을 넣는다.
+$src = @("$PSScriptRoot\src\WideAgent.cs", "$PSScriptRoot\src\AssemblyInfo.cs")
 
 # 트레이에 상주하므로 콘솔 창이 없는 winexe 로 만든다.
 & $csc /nologo /target:winexe /out:$Out /win32icon:$ico `
