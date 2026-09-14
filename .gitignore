@@ -1,0 +1,14 @@
+# 빌드 산출물
+WideAgent.exe
+*.pdb
+
+# 런타임 상태 (실행 중에 생성된다)
+WideAgent.log
+WideAgent.state
+WideAgent.chatgpt.state
+WideAgent.chatgpt.port
+WideAgent.chatgpt.exe.txt
+WideAgent.claude.applied
+
+# 사용자 설정
+WideAgent.width.txt
