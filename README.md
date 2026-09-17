@@ -80,7 +80,8 @@ powershell -ExecutionPolicy Bypass -File build.ps1
 ```
 
 Windows에 기본으로 들어 있는 .NET Framework 4.x 컴파일러만 쓴다. 따로 설치할 것이 없다.
-빌드 전에 실행 중인 WideAgent를 종료해야 한다. 아이콘까지 다시 만들려면 `-Icon` 을 붙인다.
+빌드 전에 실행 중인 WideAgent를 종료해야 한다. 아이콘은 만들어 둔 `WideAgent.ico` 가
+저장소에 들어 있어 따로 할 일이 없다. (`-Icon` 은 아이콘 원본 PNG를 가진 경우에만 쓴다.)
 
 ## 더 읽을 것
 
