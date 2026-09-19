@@ -848,16 +848,25 @@ namespace WideAgent
             catch { return null; }
         }
 
-        static List<string> DebugTargetUrls(int port)
+        // 붙을 수 있는 대상들. topLevelOnly 면 창 하나에 해당하는 것(type=page)만 준다.
+        //
+        // 목록에는 창이 아닌 것도 섞여 있다. 대화 안에 끼는 시각화나 요금제 화면은
+        // type=webview 로 뜨는데, 이것들도 chatgpt.com 문서라서 우리 스타일이 먹는다.
+        // 넣는 것까지는 해가 없지만 '이미 넓다'를 이런 페이지가 대신 대답하면 곤란하다.
+        // 요금제 창이 넓다는 이유로 정작 대화창을 건너뛰는 일이 실제로 있었다.
+        static List<string> DebugTargetUrls(int port, bool topLevelOnly)
         {
             var urls = new List<string>();
             string targets = ReadDebugTargets(port);
             if (String.IsNullOrEmpty(targets)) return urls;
 
             MatchCollection matches = Regex.Matches(targets,
-                "\\\"webSocketDebuggerUrl\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"");
+                "\\\"type\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"[^}]*?\\\"webSocketDebuggerUrl\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"");
             foreach (Match match in matches)
-                urls.Add(match.Groups[1].Value.Replace("\\/", "/"));
+            {
+                if (topLevelOnly && match.Groups[1].Value != "page") continue;
+                urls.Add(match.Groups[2].Value.Replace("\\/", "/"));
+            }
             return urls;
         }
 
@@ -873,7 +882,7 @@ namespace WideAgent
         static CdpResult EvaluateInChatGPT(int port, string expression)
         {
             var result = new CdpResult();
-            foreach (string url in DebugTargetUrls(port))
+            foreach (string url in DebugTargetUrls(port, false))
             {
                 string text = EvaluateOnTarget(port, url, expression);
                 if (text == null) continue;
@@ -903,7 +912,7 @@ namespace WideAgent
         // 읽기만 하는 확인용. 한 페이지에서라도 표식이 나오면 된다.
         static bool AnyTargetSays(int port, string expression, string marker)
         {
-            foreach (string url in DebugTargetUrls(port))
+            foreach (string url in DebugTargetUrls(port, true))
             {
                 string text = EvaluateOnTarget(port, url, expression);
                 if (text != null && text.IndexOf(marker, StringComparison.Ordinal) >= 0) return true;
