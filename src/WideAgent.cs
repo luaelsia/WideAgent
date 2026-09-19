@@ -433,6 +433,11 @@ namespace WideAgent
         public const string RestartNeededMsg = "재시작이 필요함";
         public static bool AllowChatGPTRestart = true;
 
+        // 알려진 CSS 변수 이름(1층)으로는 폭이 변하지 않아, 스타일시트에서 찾아낸
+        // 이름(2층)으로 적용했을 때 실제로 쓴 이름을 담아 둔다. ChatGPT 앱이 변수
+        // 이름을 바꿨다는 뜻이다. 알리지 않으면 사용자도 만든 사람도 한참 뒤에야 안다.
+        public static string FallbackNames;
+
         // 이번 적용에서 실제로 앱을 띄웠는지. 우리가 만든 프로세스 교체를
         // 감시 루프가 '새로 실행됨'으로 오해하지 않게 하려고 본다.
         public static bool Restarted;
@@ -475,18 +480,72 @@ namespace WideAgent
 
         // Console에 붙여넣을 코드. data-transcript-width 를 바꾸고, 앱이 다시 그리면서
         // 되돌리는 것을 MutationObserver로 막는다. 감시자는 중복 등록되지 않게 재사용한다.
+        static string SafeWidth()
+        {
+            return (Width ?? "").Replace("'", "").Replace("\r", "").Replace("\n", "").Trim();
+        }
+
+        // 요청한 폭을 px 로 풀어 두고(want), 그 폭을 쓰는 요소가 몇 개인지 세는 코드
+        // (scan)를 만든다. 적용과 확인이 같은 자를 쓰도록 한 곳에 둔다.
+        //
+        // 코드가 실행된 것과 폭이 변한 것은 다르다. 변수 이름이 바뀌면 없는 변수에 값을
+        // 넣는 꼴이 되는데, CSS 는 그것을 오류로 보지 않고 조용히 무시한다. 넣기만 해서는
+        // 성공과 구별되지 않아 폭을 직접 재는 이 검사가 필요하다.
+        //
+        // 세는 것은 문서 전체다. 대화 본문이 main 안에 있으리라고 보고 거기만 훑었더니,
+        // 앱이 화면을 갈아 끼우는 동안 main 이 거의 비어 있어 아무것도 못 재는 때가 있었다.
+        // 대신 적용 전후의 개수를 비교해서, 우리가 바꾼 것만 성공으로 센다.
+        //
+        // scan 이 -1 이면 잴 가치가 없는 페이지다. innerWidth 검사가 인라인 시각화
+        // 샌드박스(1px)를 걸러 낸다.
+        static string MeasureJs(string w)
+        {
+            return
+                "const W='" + w + "'||'1280px';" +
+                "const p=document.createElement('div');" +
+                "p.style.cssText='position:fixed;left:-9999px;top:0;visibility:hidden;max-width:'+W;" +
+                "document.body.appendChild(p);const want=getComputedStyle(p).maxWidth;p.remove();" +
+                "const scan=()=>{if(innerWidth<400||want==='none'||!document.querySelector('main'))return -1;" +
+                "const es=document.querySelectorAll('*');const n=Math.min(es.length,6000);let c=0;" +
+                "for(let i=0;i<n;i++){if(getComputedStyle(es[i]).maxWidth===want)c++;}return c;};";
+        }
+
         static string BuildPayload()
         {
-            string w = (Width ?? "").Replace("'", "").Replace("\r", "").Replace("\n", "").Trim();
+            string w = SafeWidth();
             if (target == AppKind.ChatGPT)
             {
                 return
-                    "(()=>{const W='" + w + "'||'1280px',r=document.documentElement;" +
-                    "let s=document.getElementById('wide-chatgpt');if(!s){s=document.createElement('style');" +
-                    "s.id='wide-chatgpt';document.head.appendChild(s);}" +
-                    "s.textContent=':root,body,[data-codex-window-type=\\\"electron\\\"],[class*=\\\"--thread-content-max-width\\\"]" +
-                    "{--thread-content-max-width:'+W+' !important}';" +
-                    "r.dataset.wideChatgpt='1';return 'wide-chatgpt applied @ '+W;})()";
+                    "(()=>{" + MeasureJs(w) +
+                    "const SEL=':root,body,[data-codex-window-type=\"electron\"],[class*=\"--thread-content-max-width\"]';" +
+                    "const css=ns=>ns.map(n=>n+':'+W+' !important').join(';');" +
+                    // 있던 것은 지우고 시작한다. 남겨 두면 적용 전 개수가 이미 올라가 있어
+                    // 전후 비교가 무의미해진다. 이 사이에 화면이 다시 그려지지는 않는다.
+                    "const old=document.getElementById('wide-chatgpt');if(old)old.remove();" +
+                    "const before=scan();" +
+                    "if(before<0)return 'wide-chatgpt failed';" +
+                    "const s=document.createElement('style');s.id='wide-chatgpt';document.head.appendChild(s);" +
+                    "const base=SEL+'{'+css(['--thread-content-max-width'])+'}';" +
+                    "s.textContent=base;document.documentElement.dataset.wideChatgpt='1';" +
+                    "if(scan()>before)return 'wide-chatgpt applied L1';" +
+                    // 2층. 알려진 이름이 먹지 않았으니 스타일시트에서 후보를 찾아 전부 건다.
+                    // 이름만 바뀌고 구조가 그대로면 여기서 살아난다.
+                    "const found=new Set();" +
+                    "for(const sh of document.styleSheets){try{for(const ru of sh.cssRules){" +
+                    "const st=ru.style;if(!st)continue;" +
+                    "for(let i=0;i<st.length;i++){const q=st[i];" +
+                    "if(q.slice(0,2)==='--'&&q.indexOf('max')>=0&&q.indexOf('width')>=0" +
+                    "&&/thread|conversation|chat|message|content/.test(q))found.add(q);}" +
+                    "}}catch(e){}}" +
+                    "if(found.size){const ns=[...found];" +
+                    "s.textContent=SEL+',*{'+css(ns)+'}';" +
+                    "if(scan()>before)return 'wide-chatgpt applied L2 '+ns.join(' ');" +
+                    // 2층도 아니면 넓히지도 못하면서 온 문서의 변수만 건드린 꼴이다. 되돌린다.
+                    "s.textContent=base;}" +
+                    // 여기까지 왔다는 것은 폭을 쓰는 요소가 애초에 화면에 없었다는 뜻이다.
+                    // 대화창이 아직 비어 있는 때가 그렇다. 넣어 두기는 했으나 확인은 못 했다.
+                    // 실패로 단정하면 멀쩡한 창에 대고 실패를 알리게 된다.
+                    "return before===0?'wide-chatgpt applied blind':'wide-chatgpt failed';})()";
             }
 
             return
@@ -743,48 +802,111 @@ namespace WideAgent
                 .Replace("\r", "\\r").Replace("\n", "\\n") + "\"";
         }
 
-        // marker 가 응답에 들어 있으면 성공으로 본다. 적용과 확인이 같은 경로를 쓴다.
-        static bool EvaluateInChatGPT(int port, string expression, string marker)
+        // 어느 층으로 성공했는지 담는다. 1층은 알려진 변수 이름, 2층은 스타일시트에서
+        // 찾아낸 이름이다. 2층까지 갔다는 것은 ChatGPT 앱이 바뀌었다는 뜻이라 구분해 둔다.
+        class CdpResult
         {
+            public int Level1;   // 알려진 이름으로 넓어진 것을 확인한 페이지 수
+            public int Level2;   // 찾아낸 이름으로 넓어진 것을 확인한 페이지 수
+            public int Blind;    // 대화창이긴 한데 잴 것이 없어 확인은 못 한 페이지 수
+            public string Names = "";
+            public bool Ok { get { return Level1 + Level2 + Blind > 0; } }
+        }
+
+        // 페이지 하나에 코드를 넣고 응답 전문을 돌려준다. 못 붙으면 null.
+        static string EvaluateOnTarget(int port, string url, string expression)
+        {
+            try
+            {
+                using (var ws = new ClientWebSocket())
+                {
+                    ws.Options.SetRequestHeader("Origin", "http://localhost:" + port);
+                    var connect = ws.ConnectAsync(new Uri(url), CancellationToken.None);
+                    if (!connect.Wait(3000) || ws.State != WebSocketState.Open) return null;
+
+                    string request = "{\"id\":1,\"method\":\"Runtime.evaluate\",\"params\":{" +
+                        "\"expression\":" + JsonString(expression) + ",\"returnByValue\":true}}";
+                    byte[] bytes = Encoding.UTF8.GetBytes(request);
+                    var send = ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text,
+                        true, CancellationToken.None);
+                    if (!send.Wait(3000)) return null;
+
+                    byte[] buffer = new byte[16384];
+                    var response = new StringBuilder();
+                    bool complete = false;
+                    while (!complete)
+                    {
+                        var receive = ws.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
+                        if (!receive.Wait(3000)) break;
+                        WebSocketReceiveResult result = receive.Result;
+                        response.Append(Encoding.UTF8.GetString(buffer, 0, result.Count));
+                        complete = result.EndOfMessage;
+                    }
+                    return response.ToString();
+                }
+            }
+            catch { return null; }
+        }
+
+        static List<string> DebugTargetUrls(int port)
+        {
+            var urls = new List<string>();
             string targets = ReadDebugTargets(port);
-            if (String.IsNullOrEmpty(targets)) return false;
+            if (String.IsNullOrEmpty(targets)) return urls;
 
             MatchCollection matches = Regex.Matches(targets,
                 "\\\"webSocketDebuggerUrl\\\"\\s*:\\s*\\\"([^\\\"]+)\\\"");
             foreach (Match match in matches)
+                urls.Add(match.Groups[1].Value.Replace("\\/", "/"));
+            return urls;
+        }
+
+        // 열려 있는 페이지 전부에 적용한다. 첫 성공에서 멈추지 않는다.
+        //
+        // 예전에는 처음 성공한 페이지에서 곧바로 끝냈다. 그러다 ChatGPT 앱이 대화창
+        // 말고도 인라인 시각화 샌드박스를 띄우기 시작했는데, 그 페이지가 목록 앞자리를
+        // 차지하면서 1px 짜리 샌드박스에 폭을 적용해 놓고 성공했다고 보고하는 일이
+        // 벌어졌다. 로그에는 OK 가 찍히는데 대화창은 그대로였다.
+        //
+        // 이제는 폭이 실제로 변한 것을 확인한 페이지만 센다. 분리 창처럼 대화창이
+        // 여럿일 때 전부 걸리는 것은 덤이다.
+        static CdpResult EvaluateInChatGPT(int port, string expression)
+        {
+            var result = new CdpResult();
+            foreach (string url in DebugTargetUrls(port))
             {
-                string url = match.Groups[1].Value.Replace("\\/", "/");
-                try
+                string text = EvaluateOnTarget(port, url, expression);
+                if (text == null) continue;
+
+                if (text.IndexOf("wide-chatgpt applied L1", StringComparison.Ordinal) >= 0)
                 {
-                    using (var ws = new ClientWebSocket())
-                    {
-                        ws.Options.SetRequestHeader("Origin", "http://localhost:" + port);
-                        var connect = ws.ConnectAsync(new Uri(url), CancellationToken.None);
-                        if (!connect.Wait(3000) || ws.State != WebSocketState.Open) continue;
-
-                        string request = "{\"id\":1,\"method\":\"Runtime.evaluate\",\"params\":{" +
-                            "\"expression\":" + JsonString(expression) + ",\"returnByValue\":true}}";
-                        byte[] bytes = Encoding.UTF8.GetBytes(request);
-                        var send = ws.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text,
-                            true, CancellationToken.None);
-                        if (!send.Wait(3000)) continue;
-
-                        byte[] buffer = new byte[16384];
-                        var response = new StringBuilder();
-                        bool complete = false;
-                        while (!complete)
-                        {
-                            var receive = ws.ReceiveAsync(new ArraySegment<byte>(buffer), CancellationToken.None);
-                            if (!receive.Wait(3000)) break;
-                            WebSocketReceiveResult result = receive.Result;
-                            response.Append(Encoding.UTF8.GetString(buffer, 0, result.Count));
-                            complete = result.EndOfMessage;
-                        }
-                        if (response.ToString().IndexOf(marker, StringComparison.Ordinal) >= 0)
-                            return true;
-                    }
+                    result.Level1++;
+                    continue;
                 }
-                catch { }
+
+                if (text.IndexOf("wide-chatgpt applied blind", StringComparison.Ordinal) >= 0)
+                {
+                    result.Blind++;
+                    continue;
+                }
+
+                Match found = Regex.Match(text, "wide-chatgpt applied L2 ([^\\\"]*)");
+                if (found.Success)
+                {
+                    result.Level2++;
+                    if (result.Names.Length == 0) result.Names = found.Groups[1].Value.Trim();
+                }
+            }
+            return result;
+        }
+
+        // 읽기만 하는 확인용. 한 페이지에서라도 표식이 나오면 된다.
+        static bool AnyTargetSays(int port, string expression, string marker)
+        {
+            foreach (string url in DebugTargetUrls(port))
+            {
+                string text = EvaluateOnTarget(port, url, expression);
+                if (text != null && text.IndexOf(marker, StringComparison.Ordinal) >= 0) return true;
             }
             return false;
         }
@@ -994,9 +1116,13 @@ namespace WideAgent
         {
             int port = ReadSavedDebugPort();
             if (port == 0 || !HasDebugTargets(port)) return false;
-            return EvaluateInChatGPT(port,
-                "(document.documentElement.dataset.wideChatgpt==='1')" +
-                "?'wide-chatgpt present':'wide-chatgpt absent'",
+            // 표식(dataset)만 보면 안 된다. 표식은 남아 있는데 폭은 안 먹는 상태가
+            // 있을 수 있다. ChatGPT 가 변수 이름을 바꾸면 딱 그렇게 된다. 적용할 때와
+            // 같은 자로 폭을 직접 재서, 그 경우 '넓다'고 판단하지 않게 한다.
+            return AnyTargetSays(port,
+                "(()=>{" + MeasureJs(SafeWidth()) +
+                "return (document.getElementById('wide-chatgpt')&&scan()>0)" +
+                "?'wide-chatgpt present':'wide-chatgpt absent';})()",
                 "wide-chatgpt present");
         }
 
@@ -1019,6 +1145,7 @@ namespace WideAgent
             timing = new StringBuilder();
             lastMark = 0;
             Restarted = false;
+            FallbackNames = null;
 
             if (MainWindow() == null)
             {
@@ -1053,9 +1180,21 @@ namespace WideAgent
             var ready = Stopwatch.StartNew();
             while (ready.ElapsedMilliseconds < 12000)
             {
-                if (EvaluateInChatGPT(port, BuildPayload(), "wide-chatgpt applied"))
+                CdpResult r = EvaluateInChatGPT(port, BuildPayload());
+                if (r.Ok)
                 {
                     Mark("cdp-apply");
+
+                    // 1층이 한 곳도 먹지 않고 2층으로만 살아났다면 앱이 바뀐 것이다.
+                    // 넓어지기는 했으니 사용자에게는 성공이지만, 그대로 두면 다음 변화
+                    // 때 조용히 죽는다. 찾아낸 이름을 남겨 두고 알린다.
+                    if (r.Level1 == 0 && r.Level2 > 0)
+                    {
+                        FallbackNames = r.Names;
+                        Log.Write("ChatGPT 1층 실패 - '--thread-content-max-width' 가 먹지 않음. " +
+                                  "찾아낸 이름으로 적용함: " + r.Names);
+                    }
+
                     Report("완료", 1);
                     return "OK";
                 }
@@ -1071,6 +1210,7 @@ namespace WideAgent
             timing = new StringBuilder();
             lastMark = 0;
             Restarted = false;
+            FallbackNames = null;
 
             if (target == AppKind.ChatGPT) return ApplyChatGPT();
 
@@ -1301,6 +1441,10 @@ namespace WideAgent
         // 풍선 알림을 재시작 버튼으로 쓴다. 지금 뜬 알림이 그 제안인지 구분하는 표식.
         static bool restartOffered;
 
+        // 2층 적용 알림을 이미 띄웠는지. 그리고 그 알림이 지금 로그 열기 버튼인지.
+        static bool fallbackNotified;
+        static bool logOffered;
+
         // 사용자가 다른 창을 쓰고 있어서 실패한 경우는 잠시 뒤에 다시 하면 대개 된다.
         // 사용자를 방해하지 않으려고 바로 재시도하지 않고 간격을 두고 몇 번만 시도한다.
         const int MaxRetries = 3;
@@ -1527,6 +1671,37 @@ namespace WideAgent
             catch { }
         }
 
+        // 2층으로 살아났을 때 띄운다. 넓어지긴 했으니 오류 아이콘은 쓰지 않는다.
+        // 사용자에게는 '지금은 됐지만 앱이 바뀌었다'는 예고이고, 만든 사람에게는
+        // 고치러 돌아올 신호다. 클릭하면 로그가 열린다. 찾아낸 이름이 거기 있다.
+        //
+        // 한 세션에 한 번만 띄운다. 적용할 때마다 뜨면 그냥 성가신 알림이 된다.
+        static void NotifyFallbackUsed(string names)
+        {
+            try
+            {
+                tray.BalloonTipTitle = "WideAgent - ChatGPT 앱이 바뀌었습니다";
+                tray.BalloonTipText =
+                    "평소 쓰던 CSS 변수가 더 이상 먹지 않아 다른 이름을 찾아 넓혔습니다.\r\n" +
+                    "지금은 정상이지만 다음 업데이트에서 안 될 수 있습니다.\r\n" +
+                    "이 알림을 클릭하면 로그가 열립니다. (WideAgent 갱신이 필요합니다)";
+                tray.BalloonTipIcon = ToolTipIcon.Warning;
+                logOffered = true;
+                tray.ShowBalloonTip(15000);
+                Log.Write("알림 표시 - ChatGPT CSS 변수 이름이 바뀐 것으로 보임");
+            }
+            catch { }
+        }
+
+        // 적용 직후에 부른다. 알릴 일이 없으면 아무것도 하지 않는다.
+        static void ReportFallbackIfAny()
+        {
+            string names = Claude.FallbackNames;
+            if (names == null || fallbackNotified) return;
+            fallbackNotified = true;
+            NotifyFallbackUsed(names);
+        }
+
         static void HideOverlay(int lingerMs)
         {
             var sw = Stopwatch.StartNew();
@@ -1697,6 +1872,15 @@ namespace WideAgent
             // 뒤에 눌러도 동작해야 하기 때문이다. 표식은 실제로 적용에 성공했을 때 지운다.
             tray.BalloonTipClicked += delegate
             {
+                // 2층 알림이었다면 로그를 연다. 찾아낸 변수 이름이 거기 적혀 있다.
+                if (logOffered)
+                {
+                    logOffered = false;
+                    try { Process.Start("notepad.exe", Log.Path); }
+                    catch { }
+                    return;
+                }
+
                 if (!restartOffered) return;
                 restartOffered = false;
                 Log.Write("알림 클릭 - ChatGPT 재시작 요청");
@@ -1791,6 +1975,7 @@ namespace WideAgent
                             Log.Write("ChatGPT 적용 결과: " + rq + "  [" + Claude.Timing + "]");
                             SetTrayText("WideAgent - ChatGPT - " + rq);
                             restartOffered = false;
+                            ReportFallbackIfAny();
                         }
                         attempt = 0;
                         retryPending = false;
@@ -1821,6 +2006,7 @@ namespace WideAgent
                     chatGPTSelfRestartUntil = DateTime.Now.AddMilliseconds(SelfRestartQuietMs);
                 Log.Write(AppName(kind) + " 적용 결과: " + r + "  [" + Claude.Timing + "]");
                 SetTrayText("WideAgent - " + AppName(kind) + " - " + r);
+                ReportFallbackIfAny();
 
                 if (r == "OK")
                 {
