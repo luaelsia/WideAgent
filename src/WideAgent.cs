@@ -428,6 +428,15 @@ namespace WideAgent
         // 아니면 사용자가 다른 프로그램을 쓰고 있다는 뜻이다.
         public const string FocusMsg = "다른 창을 사용 중이라 중단됨";
 
+        // 아래 두 실패는 대개 Claude가 막 떠서 페이지가 아직 자리 잡지 않았을 때 난다.
+        // 몇 초 뒤에 다시 하면 되므로 재시도 대상이다.
+        public const string DevToolsTimeoutMsg = "DevTools가 열리지 않음 (Claude 준비 중)";
+        public const string VerifyFailMsg = "적용 확인 실패 (코드가 실행되지 않음)";
+
+        // 이번 적용에서 developer_settings.json 을 막 만들었는지.
+        // 그때 DevTools가 안 열렸다면 설정 쪽을 의심할 만하다.
+        static bool devToolsJustAllowed;
+
         // 자동으로 도는 경우엔 ChatGPT를 껐다 켜지 않는다. 사용자가 방금 열어서 쓰려는
         // 참인데 앱이 사라졌다 돌아오면 놀란다. 붙을 수 없으면 알리기만 하고 물러난다.
         public const string RestartNeededMsg = "재시작이 필요함";
@@ -677,6 +686,7 @@ namespace WideAgent
                     File.Copy(file, file + ".bak", true); // 남의 설정을 지우지 않도록 백업
                 }
                 File.WriteAllText(file, "{\r\n  \"allowDevTools\": true\r\n}\r\n", new UTF8Encoding(false));
+                devToolsJustAllowed = true;
                 Log.Write("DevTools 허용 설정 생성: " + file);
                 return null;
             }
@@ -1220,6 +1230,7 @@ namespace WideAgent
             lastMark = 0;
             Restarted = false;
             FallbackNames = null;
+            devToolsJustAllowed = false;
 
             if (target == AppKind.ChatGPT) return ApplyChatGPT();
 
@@ -1277,9 +1288,13 @@ namespace WideAgent
                 if (dev == null)
                     return Fail(focusLost || !IsTargetForeground()
                         ? FocusMsg
-                        : target == AppKind.Claude
-                            ? "DevTools가 열리지 않음 (developer_settings.json 확인)"
-                            : "ChatGPT DevTools가 열리지 않음 (Ctrl+Shift+I 확인)", 1);
+                        : target != AppKind.Claude
+                            ? "ChatGPT DevTools가 열리지 않음 (Ctrl+Shift+I 확인)"
+                            // 설정은 EnsureDevToolsAllowed 가 이미 켜 두었다. 방금 만든 게 아니라면
+                            // 설정 탓이 아니라 Claude가 아직 단축키를 받을 준비가 안 된 것이다.
+                            : devToolsJustAllowed
+                                ? "DevTools가 열리지 않음 (developer_settings.json 확인)"
+                                : DevToolsTimeoutMsg, 1);
 
                 if (!SetFront(dev.Handle)) return Fail(FocusMsg, 1);
                 Pump(120);
@@ -1299,12 +1314,17 @@ namespace WideAgent
                     // 파일 검색으로 동작해서 아무것도 실행되지 않는다.
                     Report("적용 중", 0.5);
 
+                    // 지금 Claude는 DevTools를 새로 열 때마다 Console의 붙여넣기 차단이 다시 걸린다.
+                    // 그래서 우리가 연 창이면 붙여넣기 전에 차단부터 푼다. 차단이 없을 때
+                    // 'allow pasting' 을 치면 콘솔에 오류 한 줄이 남을 뿐 해는 없다.
+                    // (붙여넣기부터 해 보던 때는 매번 두 번 실패하고 3초를 버린 뒤에야 풀었다)
+
                     // 1차 - 지름길. DevTools는 마지막에 쓰던 패널을 기억하므로, 우리가 직접 연
                     // 창이고 지난번에 Console로 끝냈다면 커맨드 메뉴를 거칠 필요가 없다.
                     // 평소에는 여기서 끝난다.
                     if (weOpenedIt && ConsoleRemembered)
                     {
-                        ok = TryPayload(800);
+                        if (AllowPasting(dev.Handle)) ok = TryPayload(1800);
                         Mark("fast");
                     }
 
@@ -1314,13 +1334,14 @@ namespace WideAgent
                         Report("콘솔 여는 중", 0.7);
                         OpenConsolePanel();
                         Mark("console");
-                        ok = TryPayload(1200);
+                        if (weOpenedIt) AllowPasting(dev.Handle);
+                        ok = TryPayload(weOpenedIt ? 1800 : 1200);
                         Mark("payload");
                     }
 
-                    // 3차 - 그래도 안 되면 붙여넣기가 차단된 상태로 본다.
-                    // 이 문구는 타이핑해야 해서 1초 가까이 걸리므로 마지막에만 쓴다.
-                    if (!ok && !focusLost)
+                    // 3차 - 사용자가 직접 연 DevTools는 차단 여부를 모르므로 붙여넣기부터 해 봤다.
+                    // 안 됐으면 그제야 차단을 푼다. 우리가 연 창은 위에서 이미 풀었다.
+                    if (!ok && !focusLost && !weOpenedIt)
                     {
                         Report("차단 해제 후 재시도", 0.85);
                         AllowPasting(dev.Handle);
@@ -1389,7 +1410,7 @@ namespace WideAgent
             }
 
             if (!ok)
-                return Fail(focusLost ? FocusMsg : "적용 확인 실패 (코드가 실행되지 않음)", 1);
+                return Fail(focusLost ? FocusMsg : VerifyFailMsg, 1);
 
             Report("완료", 1);
             return "OK";
@@ -1463,6 +1484,19 @@ namespace WideAgent
         const int RetryGapMs = 500;
         const int RetryTotalSec = 3;
         const string RetryGuide = "다시 시도하려면 트레이 아이콘을 더블클릭하세요";
+
+        // Claude가 막 떠서 DevTools가 안 열리거나 코드가 안 먹은 경우. 페이지가 자리 잡을
+        // 시간을 주려고 포커스 경합보다 길게 쉬고, 횟수는 적게 한다.
+        // 자동 적용에서만 한다. 사용자가 직접 누른 것이면 결과를 바로 알려 준다.
+        const int SlowRetries = 2;
+        const int SlowRetryGapMs = 5000;
+        const int SlowRetryTotalSec = 7;
+        static bool fromAuto;        // 이번 재시도 묶음이 자동 적용에서 시작됐는지
+
+        // 자동 적용은 사용자가 다른 일을 하는 도중에 시작된다. 예고 없이 포커스를 가져가면
+        // 사용자도 놀라고 입력이 겹쳐 실패한다. 재시도처럼 카운트다운으로 먼저 알리고
+        // 손 뗄 시간을 준다.
+        const int AutoNoticeMs = 2000;
 
         static DateTime retryAt = DateTime.MinValue;
         static bool retryPending;
@@ -1946,6 +1980,8 @@ namespace WideAgent
             if (busy) return;
             busy = true;
             activeTarget = kind;
+            // 재시도는 force 로 들어오므로, 묶음의 첫 시도에서만 출처를 기록한다
+            if (attempt == 0) fromAuto = !force;
             try
             {
                 // 자동으로 도는 경우엔 오버레이를 띄우기 전에 조용히 살핀다.
@@ -1997,14 +2033,17 @@ namespace WideAgent
                     ? "WideAgent - " + AppName(kind) + " 재시도 (" + attempt + "/" + MaxRetries + ")"
                     : "WideAgent - " + AppName(kind));
 
-                if (force && delayMs > 0)
+                // 자동 적용의 delayMs 는 위에서 화면 없이 이미 기다렸다. 여기서는 예고만 한다.
+                int noticeMs = force ? delayMs : AutoNoticeMs;
+                string noticeLabel = force ? waitLabel : AppName(kind) + " 넓히는 중";
+                if (noticeMs > 0)
                 {
                     var sw = Stopwatch.StartNew();
-                    while (sw.ElapsedMilliseconds < delayMs)
+                    while (sw.ElapsedMilliseconds < noticeMs)
                     {
-                        int left = (int)Math.Ceiling((delayMs - sw.ElapsedMilliseconds) / 1000.0);
-                        overlay.Step(waitLabel + " · " + left + "초",
-                            0.02 + 0.04 * sw.ElapsedMilliseconds / delayMs, false);
+                        int left = (int)Math.Ceiling((noticeMs - sw.ElapsedMilliseconds) / 1000.0);
+                        overlay.Step(noticeLabel + " · " + left + "초",
+                            0.02 + 0.04 * sw.ElapsedMilliseconds / noticeMs, false);
                         Application.DoEvents();
                         Thread.Sleep(30);
                     }
@@ -2032,6 +2071,17 @@ namespace WideAgent
                     retryTarget = kind;
                     retryAt = DateTime.Now.AddMilliseconds(RetryGapMs);
                     overlay.Step(r + " · " + RetryTotalSec + "초 뒤 재시도", 1, true);
+                    HideOverlay(800);
+                }
+                else if (fromAuto && attempt < SlowRetries &&
+                         (r == Claude.DevToolsTimeoutMsg || r == Claude.VerifyFailMsg))
+                {
+                    // Claude가 아직 준비 중이다. 좀 더 길게 기다렸다가 다시.
+                    attempt++;
+                    retryPending = true;
+                    retryTarget = kind;
+                    retryAt = DateTime.Now.AddMilliseconds(SlowRetryGapMs);
+                    overlay.Step(r + " · " + SlowRetryTotalSec + "초 뒤 재시도", 1, true);
                     HideOverlay(800);
                 }
                 else
