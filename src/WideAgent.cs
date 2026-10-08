@@ -127,10 +127,12 @@ namespace WideAgent
 
     // 포커스를 가져가지 않는 진행 표시 창.
     // DevTools를 화면 밖에 숨겨 두기 때문에, 지금 어디까지 진행됐는지 이것으로 알린다.
+    // 모양과 색은 WideAgent 창과 같다. 카드 배경에 아이콘과 제목, 큰 상태 문구, 둥근 진행 막대, 경고 한 줄.
     class Overlay : Form
     {
-        Label title, status, warning;
-        Panel barTrack, barFill;
+        readonly PictureBox logo;
+        readonly Label title, status, warning;
+        readonly ThinBar bar;
 
         protected override CreateParams CreateParams
         {
@@ -151,41 +153,68 @@ namespace WideAgent
             ShowInTaskbar = false;
             TopMost = true;
             StartPosition = FormStartPosition.Manual;
-            Size = new Size(520, 196);
-            BackColor = Color.FromArgb(26, 26, 28);
-            Opacity = 0.96;
+            Size = new Size(UiDraw.S(520), UiDraw.S(200));
+            SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+
+            int left = UiDraw.S(28), width = UiDraw.S(464);
+
+            logo = new PictureBox();
+            logo.SizeMode = PictureBoxSizeMode.CenterImage;
+            logo.Image = AppIcon.Bitmap(UiDraw.S(20));
+            logo.SetBounds(left, UiDraw.S(22), UiDraw.S(20), UiDraw.S(20));
+            Controls.Add(logo);
 
             title = new Label();
             title.Text = "WideAgent";
-            title.ForeColor = Color.FromArgb(150, 150, 155);
-            title.Font = new Font("Segoe UI", 9.5f, FontStyle.Regular);
-            title.SetBounds(28, 22, 464, 20);
+            title.Font = new Font("Segoe UI", 9.5f, FontStyle.Bold);
+            title.SetBounds(left + UiDraw.S(28), UiDraw.S(22), width - UiDraw.S(28), UiDraw.S(20));
+            title.TextAlign = ContentAlignment.MiddleLeft;
             Controls.Add(title);
 
             status = new Label();
-            status.ForeColor = Color.FromArgb(238, 238, 242);
-            status.Font = new Font("Segoe UI", 16f, FontStyle.Regular);
-            status.SetBounds(28, 46, 464, 34);
+            status.Font = new Font("Segoe UI", 16f, FontStyle.Bold);
+            status.SetBounds(left, UiDraw.S(52), width, UiDraw.S(36));
+            status.AutoEllipsis = true;
             Controls.Add(status);
 
-            barTrack = new Panel();
-            barTrack.BackColor = Color.FromArgb(56, 56, 60);
-            barTrack.SetBounds(28, 94, 464, 5);
-            Controls.Add(barTrack);
-
-            barFill = new Panel();
-            barFill.BackColor = Color.FromArgb(217, 119, 87);   // Claude 주황
-            barFill.SetBounds(0, 0, 0, 5);
-            barTrack.Controls.Add(barFill);
+            bar = new ThinBar();
+            bar.SetBounds(left, UiDraw.S(100), width, UiDraw.S(8));
+            Controls.Add(bar);
 
             // 적용 중에 키보드나 마우스를 건드리면 키 입력이 엉뚱한 창으로 가거나
             // 포커스가 넘어가 그 시점부터 실패한다. 그래서 눈에 띄게 경고한다.
             warning = new Label();
             warning.Text = "키보드와 마우스를 건드리지 마세요";
-            warning.ForeColor = Color.FromArgb(235, 178, 90);
             warning.Font = new Font("Segoe UI", 10.5f, FontStyle.Bold);
-            warning.SetBounds(28, 114, 464, 46);
+            warning.SetBounds(left, UiDraw.S(122), width, UiDraw.S(50));
             Controls.Add(warning);
+
+            ApplyTheme();
+        }
+
+        // 띄울 때마다 현재 테마를 다시 입힌다. 창을 띄운 사이에 테마가 바뀌었을 수 있다.
+        void ApplyTheme()
+        {
+            ThemePalette t = AppTheme.Current;
+            BackColor = t.CardBackground;
+            title.ForeColor = t.TextSecondary;
+            status.ForeColor = t.TextPrimary;
+            warning.ForeColor = t.WarningSoftText;
+            bar.Fill = t.Accent;
+            bar.Invalidate();
+        }
+
+        protected override void OnShown(EventArgs e)
+        {
+            base.OnShown(e);
+            // Windows 11 은 테두리 없는 창에도 둥근 모서리를 입혀 준다. 그 밖에서는 조용히 넘어간다.
+            AppTheme.ApplyTitleBar(Handle, AppTheme.IsDark);
+        }
+
+        protected override void OnVisibleChanged(EventArgs e)
+        {
+            if (Visible) ApplyTheme();
+            base.OnVisibleChanged(e);
         }
 
         public void SetHeadline(string text)
@@ -197,19 +226,20 @@ namespace WideAgent
         // 마지막 재시도까지 실패했을 때. 사유와 함께 다시 시도하는 방법을 알려준다.
         public void ShowGuidance(string reason, string guidance)
         {
+            ThemePalette t = AppTheme.Current;
             status.Text = reason;
-            status.ForeColor = Color.FromArgb(240, 120, 110);
-            barFill.BackColor = Color.FromArgb(200, 80, 70);
-            barFill.Width = barTrack.Width;
+            status.ForeColor = t.Danger;
+            bar.Fill = t.Danger;
+            bar.Value = 1;
             warning.Text = guidance;
-            warning.ForeColor = Color.FromArgb(200, 200, 208);
+            warning.ForeColor = t.TextSecondary;
             Refresh();
         }
 
         protected override void OnPaint(PaintEventArgs e)
         {
             base.OnPaint(e);
-            using (var pen = new Pen(Color.FromArgb(72, 72, 78)))
+            using (var pen = new Pen(AppTheme.Current.Border))
                 e.Graphics.DrawRectangle(pen, 0, 0, Width - 1, Height - 1);
         }
 
@@ -223,29 +253,28 @@ namespace WideAgent
 
         public void Step(string text, double progress, bool error)
         {
+            ThemePalette t = AppTheme.Current;
             status.Text = text;
-            status.ForeColor = error ? Color.FromArgb(240, 120, 110) : Color.FromArgb(238, 238, 242);
-            barFill.BackColor = error ? Color.FromArgb(200, 80, 70) : Color.FromArgb(217, 119, 87);
+            status.ForeColor = error ? t.Danger : t.TextPrimary;
+            bar.Fill = error ? t.Danger : t.Accent;
 
             if (error)
             {
                 warning.Text = "적용에 실패했습니다";
-                warning.ForeColor = Color.FromArgb(240, 120, 110);
+                warning.ForeColor = t.Danger;
             }
             else if (progress >= 1)
             {
                 warning.Text = "이제 사용하셔도 됩니다";
-                warning.ForeColor = Color.FromArgb(120, 200, 140);
+                warning.ForeColor = t.SuccessSoftText;
             }
             else
             {
                 warning.Text = "키보드와 마우스를 건드리지 마세요";
-                warning.ForeColor = Color.FromArgb(235, 178, 90);
+                warning.ForeColor = t.WarningSoftText;
             }
 
-            if (progress < 0) progress = 0;
-            if (progress > 1) progress = 1;
-            barFill.Width = (int)(barTrack.Width * progress);
+            bar.Value = progress;
             Refresh();
         }
     }
@@ -492,6 +521,12 @@ namespace WideAgent
         static string SafeWidth()
         {
             return (Width ?? "").Replace("'", "").Replace("\r", "").Replace("\n", "").Trim();
+        }
+
+        // 실제로 쓰이는 폭. 비어 있으면 두 앱 모두 1280px 이다.
+        public static string EffectiveWidth
+        {
+            get { string w = SafeWidth(); return w == "" ? "1280px" : w; }
         }
 
         // 요청한 폭을 px 로 풀어 두고(want), 그 폭을 쓰는 요소가 몇 개인지 세는 코드
@@ -1086,7 +1121,7 @@ namespace WideAgent
         // 추론이라 틀릴 수 있다. 렌더러가 페이지를 다시 읽으면(앱 업데이트, 크래시 복구,
         // 로그아웃) 관찰자가 사라지고 기본값으로 돌아가는데 프로세스는 그대로다.
         // 그때는 좁아진 것을 보고 트레이에서 직접 적용하면 된다. 사용자가 명시적으로
-        // 요청한 경우(메뉴, 더블클릭)에는 이 건너뛰기를 적용하지 않는 이유다.
+        // 요청한 경우(트레이 메뉴, 창의 지금 적용)에는 이 건너뛰기를 적용하지 않는 이유다.
 
         static string AppliedRecordPath
         {
@@ -1214,6 +1249,7 @@ namespace WideAgent
                                   "찾아낸 이름으로 적용함: " + r.Names);
                     }
 
+                    AppliedWidth.Set(AppKind.ChatGPT, EffectiveWidth);
                     Report("완료", 1);
                     return "OK";
                 }
@@ -1412,8 +1448,504 @@ namespace WideAgent
             if (!ok)
                 return Fail(focusLost ? FocusMsg : VerifyFailMsg, 1);
 
+            AppliedWidth.Set(AppKind.Claude, EffectiveWidth);
             Report("완료", 1);
             return "OK";
+        }
+    }
+
+    // 마지막으로 적용에 성공한 폭. 창의 홈에서 '넓음 2560px' 처럼 보여 주고, 설정과 다르면 알린다.
+    //
+    // Claude 화면에서 폭을 직접 읽으려면 DevTools를 열어야 해서 상태를 볼 때마다 읽을 수는 없다.
+    // 그래서 적용에 성공한 순간의 값을 적어 둔다. 바로가기(--launch-chatgpt)로 뜬 별도 프로세스도
+    // 쓰므로 설정 파일과 섞지 않고 따로 두며, 읽을 때마다 파일에서 새로 읽는다.
+    static class AppliedWidth
+    {
+        static string FilePath
+        {
+            get { return Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), "WideAgent.applied-width.txt"); }
+        }
+
+        static string Key(AppKind kind) { return kind == AppKind.Claude ? "claude" : "chatgpt"; }
+
+        static Dictionary<string, string> Read()
+        {
+            var d = new Dictionary<string, string>();
+            try
+            {
+                if (File.Exists(FilePath))
+                    foreach (string raw in File.ReadAllLines(FilePath))
+                    {
+                        int eq = raw.IndexOf('=');
+                        if (eq > 0) d[raw.Substring(0, eq).Trim()] = raw.Substring(eq + 1).Trim();
+                    }
+            }
+            catch { }
+            return d;
+        }
+
+        // 기록이 없으면 빈 문자열. 이 기능이 생기기 전에 적용한 경우가 그렇다.
+        public static string Get(AppKind kind)
+        {
+            string v;
+            return Read().TryGetValue(Key(kind), out v) ? v : "";
+        }
+
+        public static void Set(AppKind kind, string width)
+        {
+            try
+            {
+                Dictionary<string, string> d = Read();
+                d[Key(kind)] = width;
+                var sb = new StringBuilder();
+                foreach (KeyValuePair<string, string> kv in d) sb.AppendLine(kv.Key + "=" + kv.Value);
+                File.WriteAllText(FilePath, sb.ToString());
+            }
+            catch { }
+        }
+    }
+
+    // 실행 중인 모든 프로세스의 PID, 부모 PID, 이름. 부모 관계는 Process 클래스로 알 수 없어서
+    // Toolhelp 스냅샷으로 읽는다. WMI보다 훨씬 빠르고 따로 참조할 어셈블리도 없다.
+    static class ProcTable
+    {
+        [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+        struct PROCESSENTRY32W
+        {
+            public uint dwSize;
+            public uint cntUsage;
+            public uint th32ProcessID;
+            public IntPtr th32DefaultHeapID;
+            public uint th32ModuleID;
+            public uint cntThreads;
+            public uint th32ParentProcessID;
+            public int pcPriClassBase;
+            public uint dwFlags;
+            [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 260)] public string szExeFile;
+        }
+
+        [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr CreateToolhelp32Snapshot(uint flags, uint pid);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern bool Process32FirstW(IntPtr snap, ref PROCESSENTRY32W e);
+        [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern bool Process32NextW(IntPtr snap, ref PROCESSENTRY32W e);
+        [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr h);
+
+        public class Entry
+        {
+            public int Pid;
+            public int Parent;
+            public string Name;
+        }
+
+        public static Dictionary<int, Entry> Take()
+        {
+            var result = new Dictionary<int, Entry>();
+            IntPtr snap = CreateToolhelp32Snapshot(0x2, 0);   // TH32CS_SNAPPROCESS
+            if (snap == IntPtr.Zero || snap == new IntPtr(-1)) return result;
+            try
+            {
+                var e = new PROCESSENTRY32W();
+                e.dwSize = (uint)Marshal.SizeOf(typeof(PROCESSENTRY32W));
+                if (!Process32FirstW(snap, ref e)) return result;
+                do
+                {
+                    var x = new Entry();
+                    x.Pid = (int)e.th32ProcessID;
+                    x.Parent = (int)e.th32ParentProcessID;
+                    x.Name = e.szExeFile ?? "";
+                    result[x.Pid] = x;
+                }
+                while (Process32NextW(snap, ref e));
+            }
+            finally { CloseHandle(snap); }
+            return result;
+        }
+
+        public static DateTime StartTime(int pid)
+        {
+            try { using (Process p = Process.GetProcessById(pid)) return p.StartTime; }
+            catch { return DateTime.MinValue; }
+        }
+    }
+
+    // 세션마다 앱이 함께 띄우는 Terminal 패널의 셸.
+    class CodeTerminal
+    {
+        public int Pid;
+        public string Name;
+        public DateTime Start;
+        public long Memory;
+        public bool Running;            // 셸 아래에서 명령이 돌고 있으면 true
+    }
+
+    // Claude Code 세션 하나. 데스크톱 앱의 Code 탭에서 세션을 열면 세션마다
+    // claude.exe(Claude Code) 프로세스가 하나씩 뜬다.
+    class CodeSession
+    {
+        public int Pid;
+        public long ProcStart;          // 프로세스 시작 시각(FILETIME). PID 재사용을 가려낸다.
+        public DateTime ProcessStart;
+        public string SessionId;
+        public string Name;
+        public string Cwd;
+        public string Status;           // busy / idle
+        public string Entrypoint;       // claude-desktop 이면 데스크톱 앱이 띄운 세션
+        public bool Orphan;             // 띄운 앱 프로세스가 이미 없다
+        public DateTime StartedAt;
+        public DateTime LastActivity;
+        public long Memory;
+        public CodeTerminal Terminal;
+    }
+
+    class SessionSnapshot
+    {
+        public List<CodeSession> Sessions = new List<CodeSession>();
+        public List<CodeTerminal> LooseTerminals = new List<CodeTerminal>();   // 짝이 되는 세션이 없는 터미널
+    }
+
+    // ~/.claude/sessions/<PID>.json 에서 실행 중인 세션을 읽는다.
+    //
+    // 이 파일은 Claude Code가 직접 쓰는 것이라 세션 ID, 이름, 작업 폴더, 상태가 모두 있다.
+    // 같은 폴더의 <PID>.<해시>.key 는 인증 토큰이라 열지 않는다. *.json 만 읽는다.
+    //
+    // 마지막 활동 시각은 이 파일의 updatedAt 과 대화 기록(.jsonl)의 수정 시각 중 늦은 쪽이다.
+    // 대화 기록은 메시지나 도구 결과가 생길 때마다 기록되므로 활동 여부를 가장 잘 보여 준다.
+    //
+    // 터미널은 Claude Code가 아니라 앱(NodeService)이 띄우므로 부모 관계로는 세션과 이어지지
+    // 않는다. 세션을 열 때 둘이 같은 순간에 뜨므로 시작 시각이 가장 가까운 것끼리 짝짓는다.
+    // 실제로 재 보면 1초 안쪽에서 맞는다.
+    static class CodeSessions
+    {
+        static readonly string[] ShellNames = { "pwsh.exe", "powershell.exe", "cmd.exe", "bash.exe" };
+        static readonly string[] HostNames = { "conhost.exe", "OpenConsole.exe" };
+        const double PairToleranceSec = 3;
+
+        static string ClaudeDir
+        {
+            get { return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude"); }
+        }
+
+        public static SessionSnapshot Take()
+        {
+            var snap = new SessionSnapshot();
+            Dictionary<int, ProcTable.Entry> procs = ProcTable.Take();
+
+            string dir = Path.Combine(ClaudeDir, "sessions");
+            if (Directory.Exists(dir))
+            {
+                foreach (string file in Directory.GetFiles(dir, "*.json"))
+                {
+                    try
+                    {
+                        CodeSession s = ReadSession(file, procs);
+                        if (s != null) snap.Sessions.Add(s);
+                    }
+                    catch { }
+                }
+            }
+
+            var sessionPids = new HashSet<int>();
+            foreach (CodeSession s in snap.Sessions) sessionPids.Add(s.Pid);
+
+            // 앱 프로세스(Claude Code가 아닌 claude.exe)가 직접 띄운 셸이 터미널 후보다.
+            // Claude Code가 도구 실행용으로 띄우는 셸은 부모가 Claude Code라서 여기 들지 않는다.
+            var terminals = new List<CodeTerminal>();
+            foreach (ProcTable.Entry e in procs.Values)
+            {
+                if (!IsOneOf(e.Name, ShellNames)) continue;
+                ProcTable.Entry parent;
+                if (!procs.TryGetValue(e.Parent, out parent)) continue;
+                if (!string.Equals(parent.Name, "claude.exe", StringComparison.OrdinalIgnoreCase)) continue;
+                if (sessionPids.Contains(parent.Pid)) continue;
+
+                var t = new CodeTerminal();
+                t.Pid = e.Pid;
+                t.Name = e.Name;
+                try
+                {
+                    using (Process p = Process.GetProcessById(e.Pid))
+                    {
+                        t.Start = p.StartTime;
+                        t.Memory = p.WorkingSet64;
+                    }
+                }
+                catch { continue; }
+                foreach (ProcTable.Entry c in procs.Values)
+                    if (c.Parent == e.Pid && !IsOneOf(c.Name, HostNames)) { t.Running = true; break; }
+                terminals.Add(t);
+            }
+
+            foreach (CodeSession s in snap.Sessions)
+            {
+                CodeTerminal best = null;
+                double bestGap = PairToleranceSec;
+                foreach (CodeTerminal t in terminals)
+                {
+                    double gap = Math.Abs((t.Start - s.ProcessStart).TotalSeconds);
+                    if (gap <= bestGap) { best = t; bestGap = gap; }
+                }
+                if (best != null)
+                {
+                    s.Terminal = best;
+                    terminals.Remove(best);
+                }
+            }
+            snap.LooseTerminals = terminals;
+            return snap;
+        }
+
+        static CodeSession ReadSession(string file, Dictionary<int, ProcTable.Entry> procs)
+        {
+            string json = File.ReadAllText(file, Encoding.UTF8);
+            var s = new CodeSession();
+            s.Pid = (int)Number(json, "pid");
+            s.ProcStart = Number(json, "procStart");
+            s.SessionId = Text(json, "sessionId");
+            s.Name = Text(json, "name");
+            s.Cwd = Text(json, "cwd");
+            s.Status = Text(json, "status");
+            s.Entrypoint = Text(json, "entrypoint");
+            if (s.Pid <= 0) return null;
+
+            // 파일만 남고 프로세스는 이미 끝난 경우가 많다. 살아 있는 것만 보여 준다.
+            DateTime started;
+            long memory;
+            if (!IsAlive(s.Pid, s.ProcStart, out started, out memory)) return null;
+            s.ProcessStart = started;
+            s.Memory = memory;
+
+            // 부모가 없거나, 같은 PID를 나중에 뜬 다른 프로세스가 물려받았으면 고아다.
+            ProcTable.Entry self, parent;
+            if (procs.TryGetValue(s.Pid, out self))
+            {
+                bool parentOk = procs.TryGetValue(self.Parent, out parent)
+                    && string.Equals(parent.Name, "claude.exe", StringComparison.OrdinalIgnoreCase);
+                if (parentOk)
+                {
+                    DateTime ps = ProcTable.StartTime(parent.Pid);
+                    parentOk = ps != DateTime.MinValue && ps <= started;
+                }
+                s.Orphan = !parentOk;
+            }
+
+            s.StartedAt = FromUnixMs(Number(json, "startedAt"));
+            DateTime updated = FromUnixMs(Number(json, "updatedAt"));
+            DateTime transcript = TranscriptTime(s.SessionId);
+            s.LastActivity = updated > transcript ? updated : transcript;
+            if (s.LastActivity == DateTime.MinValue) s.LastActivity = s.StartedAt;
+            return s;
+        }
+
+        static bool IsOneOf(string name, string[] names)
+        {
+            foreach (string n in names)
+                if (string.Equals(name, n, StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
+        // PID가 살아 있고, 그 프로세스가 파일에 적힌 바로 그 프로세스인지 본다.
+        // Windows는 PID를 다시 쓰므로 시작 시각까지 맞아야 같은 프로세스다.
+        static bool IsAlive(int pid, long procStart, out DateTime started, out long memory)
+        {
+            started = DateTime.MinValue;
+            memory = 0;
+            try
+            {
+                using (Process p = Process.GetProcessById(pid))
+                {
+                    if (!string.Equals(p.ProcessName, "claude", StringComparison.OrdinalIgnoreCase)) return false;
+                    started = p.StartTime;
+                    if (procStart > 0 && Math.Abs(started.ToFileTimeUtc() - procStart) > 10000000L) return false;   // 1초
+                    memory = p.WorkingSet64;
+                    return true;
+                }
+            }
+            catch { return false; }
+        }
+
+        static DateTime TranscriptTime(string sessionId)
+        {
+            if (string.IsNullOrEmpty(sessionId)) return DateTime.MinValue;
+            try
+            {
+                string projects = Path.Combine(ClaudeDir, "projects");
+                if (!Directory.Exists(projects)) return DateTime.MinValue;
+                DateTime latest = DateTime.MinValue;
+                foreach (string d in Directory.GetDirectories(projects))
+                {
+                    string f = Path.Combine(d, sessionId + ".jsonl");
+                    if (!File.Exists(f)) continue;
+                    DateTime t = File.GetLastWriteTime(f);
+                    if (t > latest) latest = t;
+                }
+                return latest;
+            }
+            catch { return DateTime.MinValue; }
+        }
+
+        // 지정한 세션의 Claude Code 프로세스 하나만 끝낸다. 앱 본체는 건드리지 않는다.
+        // 목록을 띄운 뒤 시간이 지났을 수 있으므로 끄기 직전에 같은 프로세스인지 다시 본다.
+        public static bool Kill(CodeSession s, out string error)
+        {
+            error = null;
+            DateTime started;
+            long memory;
+            if (!IsAlive(s.Pid, s.ProcStart, out started, out memory))
+            {
+                error = "이미 종료됐습니다";
+                return false;
+            }
+            return KillPid(s.Pid, out error);
+        }
+
+        // 터미널 셸을 끝낸다. 그사이 명령이 돌기 시작했으면 끄지 않는다.
+        public static bool KillTerminal(CodeTerminal t, out string error)
+        {
+            error = null;
+            if (ProcTable.StartTime(t.Pid) != t.Start)
+            {
+                error = "이미 종료됐습니다";
+                return false;
+            }
+            foreach (ProcTable.Entry c in ProcTable.Take().Values)
+            {
+                if (c.Parent == t.Pid && !IsOneOf(c.Name, HostNames))
+                {
+                    error = "터미널에서 명령이 실행 중입니다";
+                    return false;
+                }
+            }
+            return KillPid(t.Pid, out error);
+        }
+
+        static bool KillPid(int pid, out string error)
+        {
+            error = null;
+            try
+            {
+                using (Process p = Process.GetProcessById(pid))
+                {
+                    p.Kill();
+                    p.WaitForExit(3000);
+                }
+                return true;
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                return false;
+            }
+        }
+
+        public static string Label(CodeSession s)
+        {
+            return (string.IsNullOrEmpty(s.Name) ? "(이름 없음)" : s.Name) + " [PID " + s.Pid + "]";
+        }
+
+        static DateTime FromUnixMs(long ms)
+        {
+            if (ms <= 0) return DateTime.MinValue;
+            return new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddMilliseconds(ms).ToLocalTime();
+        }
+
+        // 필드 몇 개만 읽으면 되므로 JSON 라이브러리 없이 정규식으로 꺼낸다.
+        static string Text(string json, string key)
+        {
+            Match m = Regex.Match(json, "\"" + key + "\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"");
+            if (!m.Success) return "";
+            try { return Regex.Unescape(m.Groups[1].Value); }
+            catch { return m.Groups[1].Value; }
+        }
+
+        static long Number(string json, string key)
+        {
+            Match m = Regex.Match(json, "\"" + key + "\"\\s*:\\s*\"?(\\d+)");
+            long v;
+            return m.Success && long.TryParse(m.Groups[1].Value, out v) ? v : 0;
+        }
+    }
+
+    // 오래 놀고 있는 세션을 주기적으로 정리한다. 설정은 WideAgent.settings.txt 의
+    // cleanupHours / cleanupTerminal / cleanupNotify 에 둔다. 기본은 꺼짐이다.
+    //
+    // 끄는 것:
+    //   - 상태가 idle 이고 마지막 활동으로부터 Hours 시간이 지난 세션의 Claude Code
+    //   - 데스크톱 앱이 띄웠는데 앱 프로세스가 이미 없는 Claude Code(고아)
+    //   - Terminal 이 켜져 있으면, 위에서 끈 세션과 짝인 터미널 중 명령이 돌지 않는 것
+    // 끈 세션에 다시 메시지를 보내면 앱이 Claude Code를 새로 띄워 이어 간다.
+    static class Cleanup
+    {
+        public static readonly int[] HourChoices = { 3, 4, 6 };
+        public static int Hours;            // 0 이면 꺼짐
+        public static bool Terminal;
+        public static bool Notify;
+
+        public static void Load()
+        {
+            Hours = Math.Max(0, AppSettings.GetInt("cleanupHours", 0));
+            Terminal = AppSettings.GetBool("cleanupTerminal", false);
+            Notify = AppSettings.GetBool("cleanupNotify", false);
+        }
+
+        public static void Save()
+        {
+            AppSettings.Set("cleanupHours", Hours);
+            AppSettings.Set("cleanupTerminal", Terminal);
+            AppSettings.Set("cleanupNotify", Notify);
+            AppSettings.Save();
+            Log.Write("자동 정리 설정: " + Summary + (Notify ? ", 알림 켬" : ""));
+        }
+
+        public static string Summary
+        {
+            get
+            {
+                if (Hours <= 0) return "자동 정리 꺼짐";
+                return "자동 정리: 대기 " + Hours + "시간 지난 세션" + (Terminal ? ", 터미널 포함" : "");
+            }
+        }
+
+        // 끈 세션 수를 돌려준다. freed 는 끈 프로세스들이 쓰던 메모리 합이다.
+        public static int Run(out long freed)
+        {
+            freed = 0;
+            if (Hours <= 0) return 0;
+            int count = 0;
+            try
+            {
+                SessionSnapshot snap = CodeSessions.Take();
+                DateTime now = DateTime.Now;
+                foreach (CodeSession s in snap.Sessions)
+                {
+                    string reason = null;
+                    if (s.Orphan && s.Entrypoint == "claude-desktop") reason = "고아";
+                    else if (s.Status == "idle" && (now - s.LastActivity).TotalHours >= Hours)
+                        reason = "대기 " + (int)(now - s.LastActivity).TotalHours + "시간";
+                    if (reason == null) continue;
+
+                    string error;
+                    if (CodeSessions.Kill(s, out error))
+                    {
+                        count++;
+                        freed += s.Memory;
+                        Log.Write("자동 정리: " + CodeSessions.Label(s) + ", " + reason);
+                    }
+                    else
+                        Log.Write("자동 정리 실패: " + CodeSessions.Label(s) + ", " + error);
+
+                    if (Terminal && s.Terminal != null && !s.Terminal.Running)
+                    {
+                        if (CodeSessions.KillTerminal(s.Terminal, out error))
+                        {
+                            freed += s.Terminal.Memory;
+                            Log.Write("자동 정리: 터미널 " + s.Terminal.Name + " [PID " + s.Terminal.Pid + "]");
+                        }
+                        else
+                            Log.Write("자동 정리 터미널 실패: [PID " + s.Terminal.Pid + "] " + error);
+                    }
+                }
+            }
+            catch (Exception ex) { Log.Write("자동 정리 오류: " + ex.Message); }
+            return count;
         }
     }
 
@@ -1453,9 +1985,18 @@ namespace WideAgent
     static class Program
     {
         static NotifyIcon tray;
-        static ToolStripMenuItem autoStartItem;
         static System.Windows.Forms.Timer timer;
         static Overlay overlay;
+        static MainForm mainForm;
+        static ContextMenuStrip trayMenu;
+        static System.Windows.Forms.Timer cleanupTimer;
+        static System.Windows.Forms.Timer updateTimer;
+        static Action refreshCleanupMenu;
+
+        // 세션 정리 알림과 새 버전 알림도 풍선을 클릭 대상으로 쓴다. 지금 뜬 알림이 어느 것인지 구분한다.
+        static bool sessionsOffered;
+        static bool updateOffered;
+        static string notifiedVersion;
         static bool wasClaudeReady;
         static bool wasChatGPTReady;
         static AppKind activeTarget = AppKind.Claude;
@@ -1483,7 +2024,7 @@ namespace WideAgent
         const int RetryNoticeMs = 2000;
         const int RetryGapMs = 500;
         const int RetryTotalSec = 3;
-        const string RetryGuide = "다시 시도하려면 트레이 아이콘을 더블클릭하세요";
+        const string RetryGuide = "다시 시도하려면 트레이 메뉴에서 '지금 적용'을 누르세요";
 
         // Claude가 막 떠서 DevTools가 안 열리거나 코드가 안 먹은 경우. 페이지가 자리 잡을
         // 시간을 주려고 포커스 경합보다 길게 쉬고, 횟수는 적게 한다.
@@ -1530,6 +2071,11 @@ namespace WideAgent
                 if (File.Exists(wf)) Claude.Width = File.ReadAllText(wf).Trim();
             }
             catch { }
+
+            AppSettings.FilePath = Path.Combine(dir, "WideAgent.settings.txt");
+            AppSettings.Load();
+            Cleanup.Load();
+            AppTheme.Preference = AppSettings.Theme;
 
             Application.EnableVisualStyles();
 
@@ -1632,6 +2178,30 @@ namespace WideAgent
                 timer.Tick += Poll;
                 timer.Start();
 
+                // 놀고 있는 세션 정리. 마지막 활동 시각은 파일에 남아 있어서 주기가 길어도
+                // 활동을 놓치지 않는다. 꺼져 있으면 Run 이 바로 돌아간다.
+                cleanupTimer = new System.Windows.Forms.Timer();
+                cleanupTimer.Interval = 10 * 60 * 1000;
+                cleanupTimer.Tick += delegate { RunCleanup(); };
+                cleanupTimer.Start();
+
+                // 새 버전 확인. 시작 직후는 네트워크가 아직 안 붙어 있을 수 있어 1분 뒤에 처음 본다.
+                updateTimer = new System.Windows.Forms.Timer();
+                updateTimer.Interval = 60 * 1000;
+                updateTimer.Tick += delegate
+                {
+                    updateTimer.Interval = 24 * 60 * 60 * 1000;
+                    if (AppSettings.CheckUpdates) CheckUpdateQuietly();
+                };
+                updateTimer.Start();
+
+                // Windows 라이트/다크가 바뀌면 창과 트레이 메뉴를 다시 칠한다.
+                SystemEvents.UserPreferenceChanged += delegate (object s3, UserPreferenceChangedEventArgs ue)
+                {
+                    if (ue.Category == UserPreferenceCategory.General) AppTheme.NotifySystemThemeChanged();
+                };
+                AppTheme.Changed += delegate { if (trayMenu != null) ThemedMenu.Apply(trayMenu); };
+
                 Application.Run();
 
                 tray.Visible = false;
@@ -1706,7 +2276,7 @@ namespace WideAgent
                 tray.BalloonTipText =
                     "앱을 다시 시작해야 넓어집니다. 이 알림을 클릭하면 지금 다시 시작합니다.\r\n" +
                     "직접 껐다 켜는 것으로는 넓어지지 않습니다.\r\n" +
-                    "트레이 메뉴에서 'ChatGPT (Wide)' 바로가기를 만들면 이 과정이 없습니다.";
+                    "WideAgent 창의 홈에서 'ChatGPT (Wide)' 바로가기를 만들면 이 과정이 없습니다.";
                 tray.BalloonTipIcon = ToolTipIcon.Info;
                 restartOffered = true;
                 tray.ShowBalloonTip(10000);
@@ -1762,7 +2332,7 @@ namespace WideAgent
         // 그 경로로는 명령줄 인자를 붙일 방법이 없어서, 인자를 붙일 수 있는 우리 바로가기를
         // 따로 만들어 준다. 대상은 ChatGPT.exe 가 아니라 WideAgent.exe 다. 그래야 패키지
         // 업데이트로 설치 경로가 바뀌어도 바로가기를 다시 만들 필요가 없다.
-        static void CreateChatGPTShortcut()
+        public static void CreateChatGPTShortcut()
         {
             try
             {
@@ -1816,71 +2386,199 @@ namespace WideAgent
         {
             Log.Write("종료");
             try { if (timer != null) timer.Stop(); } catch { }
+            try { if (cleanupTimer != null) cleanupTimer.Stop(); } catch { }
+            try { if (updateTimer != null) updateTimer.Stop(); } catch { }
+            try { if (mainForm != null && !mainForm.IsDisposed) { mainForm.AllowClose = true; mainForm.Close(); } } catch { }
             try { if (tray != null) { tray.Visible = false; tray.Dispose(); } } catch { }
             try { if (overlay != null) { overlay.Hide(); overlay.Dispose(); } } catch { }
             Application.Exit();
             Environment.Exit(0);
         }
 
+        // ---------- 창과 다른 화면에서 부르는 동작 ----------
+
+        public static bool IsBusy { get { return busy; } }
+
+        // 창은 하나만 띄운다. 이미 있으면 앞으로 가져와 원하는 페이지를 연다.
+        public static void ShowMain(int page)
+        {
+            if (mainForm == null || mainForm.IsDisposed) mainForm = new MainForm();
+            if (!mainForm.Visible) mainForm.Show();
+            if (mainForm.WindowState == FormWindowState.Minimized) mainForm.WindowState = FormWindowState.Normal;
+            mainForm.ShowPage(page);
+            mainForm.Activate();
+        }
+
+        static void RefreshMain()
+        {
+            if (mainForm != null && !mainForm.IsDisposed && mainForm.Visible) mainForm.RefreshPage();
+        }
+
+        public static void ApplyNow(AppKind kind)
+        {
+            attempt = 0;
+            retryPending = false;
+            RunApply(kind, 0, null, true);
+            RefreshMain();
+        }
+
+        public static void OpenLog()
+        {
+            try
+            {
+                if (!File.Exists(Log.Path)) Log.Write("로그 열기");
+                Process.Start("notepad.exe", Log.Path);
+            }
+            catch { }
+        }
+
+        // 빈 값이면 기본 폭(1280px)으로 돌아가고 파일도 지운다.
+        public static void SetWidth(string value)
+        {
+            Claude.Width = value ?? "";
+            try
+            {
+                string wf = Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), "WideAgent.width.txt");
+                if (Claude.Width == "") { if (File.Exists(wf)) File.Delete(wf); }
+                else File.WriteAllText(wf, Claude.Width);
+                Log.Write("대화창 폭: " + (Claude.Width == "" ? "기본" : Claude.Width));
+            }
+            catch (Exception ex) { Log.Write("대화창 폭 저장 실패: " + ex.Message); }
+        }
+
+        public static void SetCleanupHours(int hours)
+        {
+            Cleanup.Hours = hours;
+            Cleanup.Save();
+            CleanupSettingsChanged();
+            RunCleanup();   // 켜는 순간 이미 기준을 넘은 세션은 바로 정리한다
+        }
+
+        public static void CleanupSettingsChanged()
+        {
+            if (refreshCleanupMenu != null) refreshCleanupMenu();
+            RefreshMain();
+        }
+
+        static void RunCleanup()
+        {
+            long freed;
+            int n = Cleanup.Run(out freed);
+            if (n > 0 && Cleanup.Notify)
+                ShowOfferBalloon("WideAgent - 세션 정리",
+                    "놀고 있던 세션 " + n + "개를 정리했습니다 (메모리 약 " + (freed / (1024 * 1024)).ToString("N0") + " MB).\r\n" +
+                    "이 알림을 클릭하면 세션 화면이 열립니다.", ref sessionsOffered);
+            if (n > 0) RefreshMain();
+        }
+
+        static void CheckUpdateQuietly()
+        {
+            Updater.Check(delegate (Version latest, string error)
+            {
+                if (latest == null) { Log.Write("업데이트 확인 실패: " + error); return; }
+                if (latest <= Updater.Current) return;
+                string v = latest.ToString(3);
+                if (notifiedVersion == v) return;   // 같은 버전은 한 번만 알린다
+                notifiedVersion = v;
+                Log.Write("새 버전 있음: " + v);
+                ShowOfferBalloon("WideAgent - 새 버전 " + v,
+                    "새 버전이 나왔습니다. 이 알림을 클릭하면 릴리스 페이지가 열립니다.", ref updateOffered);
+            });
+        }
+
+        // 클릭하면 무언가를 여는 풍선 알림. ChatGPT 재시작 제안이나 로그 안내가 아직 살아 있으면
+        // 그 알림을 덮지 않는다. 덮으면 그 알림을 눌렀을 때 엉뚱한 동작이 일어난다.
+        static void ShowOfferBalloon(string title, string text, ref bool flag)
+        {
+            if (restartOffered || logOffered) return;
+            try
+            {
+                sessionsOffered = false;
+                updateOffered = false;
+                tray.BalloonTipTitle = title;
+                tray.BalloonTipText = text;
+                tray.BalloonTipIcon = ToolTipIcon.Info;
+                flag = true;
+                tray.ShowBalloonTip(10000);
+            }
+            catch { }
+        }
+
+        // 자동 정리 하위 메뉴: 끔 / 3시간 / 4시간 / 6시간 중 하나, 그리고 터미널 포함 여부.
+        // 설정 화면과 같은 값을 다루므로 어느 쪽에서 바꿔도 서로 맞춘다.
+        static ToolStripMenuItem BuildCleanupMenu()
+        {
+            var root = new ToolStripMenuItem("놀고 있는 세션 자동 정리");
+            var choices = new List<ToolStripMenuItem>();
+
+            var off = new ToolStripMenuItem("끔");
+            off.Tag = 0;
+            choices.Add(off);
+            foreach (int h in Cleanup.HourChoices)
+            {
+                var item = new ToolStripMenuItem("대기 " + h + "시간 지나면");
+                item.Tag = h;
+                choices.Add(item);
+            }
+            foreach (ToolStripMenuItem c in choices)
+            {
+                ToolStripMenuItem captured = c;
+                captured.Click += delegate { SetCleanupHours((int)captured.Tag); };
+                root.DropDownItems.Add(captured);
+            }
+
+            root.DropDownItems.Add(new ToolStripSeparator());
+            var terminal = new ToolStripMenuItem("세션의 터미널도 같이 정리");
+            terminal.Click += delegate
+            {
+                Cleanup.Terminal = !Cleanup.Terminal;
+                Cleanup.Save();
+                CleanupSettingsChanged();
+            };
+            root.DropDownItems.Add(terminal);
+
+            refreshCleanupMenu = delegate
+            {
+                foreach (ToolStripMenuItem c in choices) c.Checked = (int)c.Tag == Cleanup.Hours;
+                terminal.Checked = Cleanup.Terminal;
+            };
+            refreshCleanupMenu();
+            return root;
+        }
+
         static void BuildTray()
         {
             var menu = new ContextMenuStrip();
+            trayMenu = menu;
+
+            // 자주 쓰는 동작만 둔다. 자동 실행, 바로가기, 로그는 창으로 옮겼다.
+            var openItem = new ToolStripMenuItem("열기");
+            openItem.Font = new Font(openItem.Font, FontStyle.Bold);
+            openItem.Click += delegate { ShowMain(MainForm.PageHome); };
+            menu.Items.Add(openItem);
+
+            menu.Items.Add(new ToolStripSeparator());
 
             var applyClaudeItem = new ToolStripMenuItem("Claude에 지금 적용");
-            applyClaudeItem.Click += delegate
-            {
-                attempt = 0;
-                retryPending = false;
-                RunApply(AppKind.Claude, 0, null, true);
-            };
+            applyClaudeItem.Click += delegate { ApplyNow(AppKind.Claude); };
             menu.Items.Add(applyClaudeItem);
 
             var applyChatGPTItem = new ToolStripMenuItem("ChatGPT에 지금 적용");
-            applyChatGPTItem.Click += delegate
-            {
-                attempt = 0;
-                retryPending = false;
-                RunApply(AppKind.ChatGPT, 0, null, true);
-            };
+            applyChatGPTItem.Click += delegate { ApplyNow(AppKind.ChatGPT); };
             menu.Items.Add(applyChatGPTItem);
 
             menu.Items.Add(new ToolStripSeparator());
 
-            autoStartItem = new ToolStripMenuItem("Windows 시작 시 자동 실행");
-            autoStartItem.CheckOnClick = true;
-            autoStartItem.Checked = AutoStart.Enabled;
-            autoStartItem.Click += delegate
-            {
-                try
-                {
-                    AutoStart.Set(autoStartItem.Checked);
-                    Log.Write("자동 실행 " + (autoStartItem.Checked ? "켬" : "끔"));
-                }
-                catch (Exception ex)
-                {
-                    autoStartItem.Checked = AutoStart.Enabled;
-                    MessageBox.Show("자동 실행 설정 실패: " + ex.Message, "WideAgent");
-                }
-            };
-            menu.Items.Add(autoStartItem);
-
-            var shortcutItem = new ToolStripMenuItem("ChatGPT 넓게 실행 바로가기 만들기");
-            shortcutItem.Click += delegate { CreateChatGPTShortcut(); };
-            menu.Items.Add(shortcutItem);
-
-            var logItem = new ToolStripMenuItem("로그 열기");
-            logItem.Click += delegate
-            {
-                try
-                {
-                    if (!File.Exists(Log.Path)) Log.Write("로그 열기");
-                    Process.Start("notepad.exe", Log.Path);
-                }
-                catch { }
-            };
-            menu.Items.Add(logItem);
+            var sessionsItem = new ToolStripMenuItem("Claude Code 세션 보기");
+            sessionsItem.Click += delegate { ShowMain(MainForm.PageSessions); };
+            menu.Items.Add(sessionsItem);
+            menu.Items.Add(BuildCleanupMenu());
 
             menu.Items.Add(new ToolStripSeparator());
+
+            var settingsItem = new ToolStripMenuItem("설정");
+            settingsItem.Click += delegate { ShowMain(MainForm.PageSettings); };
+            menu.Items.Add(settingsItem);
 
             var exitItem = new ToolStripMenuItem("종료");
             // 트레이 메뉴에서 Application.Exit() 을 그냥 부르면 종료되지 않는 때가 있다.
@@ -1896,18 +2594,13 @@ namespace WideAgent
             menu.Items.Add(exitItem);
 
             tray = new NotifyIcon();
-            try { tray.Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); }
-            catch { tray.Icon = SystemIcons.Application; }
+            tray.Icon = AppIcon.Get(SystemInformation.SmallIconSize.Width);
             tray.Text = "WideAgent";
+            ThemedMenu.Apply(menu);
             tray.ContextMenuStrip = menu;
             tray.Visible = true;
-            tray.DoubleClick += delegate
-            {
-                attempt = 0;
-                retryPending = false;
-                AppKind kind = Claude.IsReady(AppKind.ChatGPT) ? AppKind.ChatGPT : AppKind.Claude;
-                RunApply(kind, 0, null, true);
-            };
+            // 더블클릭은 창을 연다. 다시 적용은 트레이 메뉴나 창의 [지금 적용]으로 한다.
+            tray.DoubleClick += delegate { ShowMain(MainForm.PageHome); };
 
             // 알림을 클릭하면 그 자리에서 재시작하고 넓힌다. 알림이 곧 재시작 버튼이다.
             //
@@ -1921,6 +2614,20 @@ namespace WideAgent
                     logOffered = false;
                     try { Process.Start("notepad.exe", Log.Path); }
                     catch { }
+                    return;
+                }
+
+                if (sessionsOffered)
+                {
+                    sessionsOffered = false;
+                    ShowMain(MainForm.PageSessions);
+                    return;
+                }
+
+                if (updateOffered)
+                {
+                    updateOffered = false;
+                    Updater.OpenReleases();
                     return;
                 }
 
@@ -1973,7 +2680,7 @@ namespace WideAgent
             wasChatGPTReady = chatGPTReady;
         }
 
-        // force = 사용자가 직접 요청한 것(메뉴, 더블클릭). 이때는 확인 없이 무조건 적용한다.
+        // force = 사용자가 직접 요청한 것(트레이 메뉴, 창의 지금 적용). 이때는 확인 없이 무조건 적용한다.
         // 화면이 좁아 보여서 누른 것이므로, 기록을 믿고 건너뛰면 안 된다.
         static void RunApply(AppKind kind, int delayMs, string waitLabel, bool force)
         {

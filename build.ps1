@@ -24,10 +24,16 @@ if ($Icon) {
 $ico = "$PSScriptRoot\WideAgent.ico"
 
 # AssemblyInfo.cs 는 exe 속성 창에 뜨는 제품명·회사명·버전을 넣는다.
-$src = @("$PSScriptRoot\src\WideAgent.cs", "$PSScriptRoot\src\AssemblyInfo.cs")
+$src = @(
+    "$PSScriptRoot\src\WideAgent.cs",
+    "$PSScriptRoot\src\Theme.cs",
+    "$PSScriptRoot\src\MainForm.cs",
+    "$PSScriptRoot\src\AssemblyInfo.cs")
 
 # 트레이에 상주하므로 콘솔 창이 없는 winexe 로 만든다.
-& $csc /nologo /target:winexe /out:$Out /win32icon:$ico `
+# 아이콘은 탐색기용(win32icon)과 창, 트레이용 리소스(resource)로 두 번 넣는다.
+# 리소스 쪽은 여러 크기가 그대로 들어 있어 큰 로고도 흐리지 않게 그릴 수 있다.
+& $csc /nologo /target:winexe /out:$Out /win32icon:$ico "/resource:$ico,WideAgent.ico" `
     /reference:System.dll,System.Drawing.dll,System.Windows.Forms.dll `
     $src
 

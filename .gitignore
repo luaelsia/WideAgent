@@ -9,9 +9,11 @@ WideAgent.chatgpt.state
 WideAgent.chatgpt.port
 WideAgent.chatgpt.exe.txt
 WideAgent.claude.applied
+WideAgent.applied-width.txt
 
 # 사용자 설정
 WideAgent.width.txt
+WideAgent.settings.txt
 
 # 아이콘 시안 작업 폴더 (배포 저장소에 넣지 않는다)
 assets/
